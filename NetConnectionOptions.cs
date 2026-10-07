@@ -16,15 +16,15 @@ namespace NetClient
     {
         /// <summary>
         /// The <see cref="Envelope.Type"/> of heartbeat packets, as the application names it.
-        /// Received ones only reset the timeout (they are not raised as
-        /// <see cref="NetConnection.EnvelopeReceived"/>). Null or empty: no heartbeat at all.
+        /// Received ones are not raised as <see cref="NetConnection.EnvelopeReceived"/> (like any
+        /// received line, they only reset the timeout). Null or empty: no heartbeat at all.
         /// </summary>
         public string HeartbeatType { get; init; }
 
-        /// <summary>How often a heartbeat is sent (and the timeout checked). Default 1 second.</summary>
+        /// <summary>How often a heartbeat is sent (and the timeout checked) at first; changed at run time by <see cref="NetConnection.SetHeartbeatInterval"/>. Default 1 second.</summary>
         public TimeSpan HeartbeatInterval { get; init; } = TimeSpan.FromSeconds(1);
 
-        /// <summary>How long without a received heartbeat before the connection counts as lost and is closed. Default 8 seconds.</summary>
+        /// <summary>How long without any received line before the connection counts as lost and is closed. Default 8 seconds.</summary>
         public TimeSpan HeartbeatTimeout { get; init; } = TimeSpan.FromSeconds(8);
 
         /// <summary>Whether a heartbeat runs at all.</summary>

@@ -19,8 +19,9 @@ namespace NetClient
     /// <summary>
     /// One client connection's lifecycle: opens the transport, reads JSON line packets
     /// (<see cref="Envelope"/>), runs the application's <see cref="ConnectionHandshake"/>, then keeps
-    /// a heartbeat going (sends one every interval, closes the connection when none arrives within
-    /// the timeout), and reconnects on request. Thread-safe; a reconnect replaces the whole
+    /// a heartbeat going (sends one every interval, changeable at any time with
+    /// <see cref="SetHeartbeatInterval"/>; closes the connection when nothing at all arrives within
+    /// the timeout: any received line is a sign of life), and reconnects on request. Thread-safe; a reconnect replaces the whole
     /// connection, and work belonging to an older one (its reader, its heartbeat, its handshake)
     /// can never close the newer one.
     /// </summary>
@@ -39,6 +40,9 @@ namespace NetClient
         // The handshake of the last ConnectAsync, run again by Reconnect.
         private ConnectionHandshake _handshake;
 
+        // How often a heartbeat is sent (and the timeout checked); starts at the options' interval.
+        private TimeSpan _heartbeatInterval;
+
         /// <summary>One opened (or opening) connection; replaced as a whole on reconnect.</summary>
         private sealed class Session
         {
@@ -46,7 +50,7 @@ namespace NetClient
             public Stream Stream;
             public LineFraming Framing;
             public Timer HeartbeatTimer;
-            public long LastHeartbeatTicks;  // UTC ticks of the last received heartbeat
+            public long LastReceivedTicks;  // UTC ticks of the last received line (any line)
         }
 
         /// <summary>Creates a disconnected connection.</summary>
@@ -65,11 +69,22 @@ namespace NetClient
                 ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_options.HeartbeatTimeout, TimeSpan.Zero, nameof(options));
             }
 
+            _heartbeatInterval = _options.HeartbeatInterval;
             ClientId = Guid.NewGuid();
         }
 
         /// <summary>A random id for this client instance (the sender id of its heartbeats).</summary>
         public Guid ClientId { get; }
+
+        /// <summary>How often a heartbeat is sent (see <see cref="SetHeartbeatInterval"/>).</summary>
+        public TimeSpan HeartbeatInterval
+        {
+            get
+            {
+                lock (_lock)
+                    return _heartbeatInterval;
+            }
+        }
 
         /// <summary>The endpoint, for diagnostics.</summary>
         public string Endpoint => _transport.Describe();
@@ -193,6 +208,26 @@ namespace NetClient
             _ = ConnectAsync(handshake);
         }
 
+        /// <summary>
+        /// Changes how often a heartbeat is sent (and the timeout checked), e.g. faster while the
+        /// other side expects frequent signs of life. Applies to the running connection at once
+        /// (a heartbeat goes out immediately, then one every <paramref name="interval"/>) and to
+        /// every later one. Does nothing to a connection without heartbeat.
+        /// </summary>
+        /// <param name="interval">The new interval (positive).</param>
+        public void SetHeartbeatInterval(TimeSpan interval)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(interval, TimeSpan.Zero);
+            lock (_lock)
+            {
+                if (_heartbeatInterval == interval)
+                    return;
+                _heartbeatInterval = interval;
+                // Sent at once: the old interval may have been too slow for what the other side now expects.
+                _session?.HeartbeatTimer?.Change(TimeSpan.Zero, interval);
+            }
+        }
+
         /// <summary>Sends one packet. A failed write closes the connection.</summary>
         /// <param name="envelope">The packet.</param>
         /// <returns>True when it was written; false when not connected or the write failed.</returns>
@@ -286,6 +321,9 @@ namespace NetClient
                         return;
                     }
 
+                    // Anything received shows the other side is alive, not only its heartbeats.
+                    Volatile.Write(ref session.LastReceivedTicks, DateTime.UtcNow.Ticks);
+
                     if (!Envelope.TryParse(line, out Envelope envelope, out string error))
                     {
                         // Blank lines and a bare "null" are harmless; anything else is worth a warning.
@@ -296,10 +334,7 @@ namespace NetClient
                     }
 
                     if (_options.HeartbeatEnabled && envelope.Type == _options.HeartbeatType)
-                    {
-                        Volatile.Write(ref session.LastHeartbeatTicks, DateTime.UtcNow.Ticks);
                         continue;
-                    }
 
                     try
                     {
@@ -325,9 +360,9 @@ namespace NetClient
         /// <summary>Starts <paramref name="session"/>'s heartbeat (called under the lock).</summary>
         private void StartHeartbeat(Session session)
         {
-            // The timeout window starts now, not at a heartbeat from an earlier connection.
-            Volatile.Write(ref session.LastHeartbeatTicks, DateTime.UtcNow.Ticks);
-            session.HeartbeatTimer = new Timer(_ => HeartbeatTick(session), null, TimeSpan.Zero, _options.HeartbeatInterval);
+            // The timeout window starts now, not at a line from an earlier connection.
+            Volatile.Write(ref session.LastReceivedTicks, DateTime.UtcNow.Ticks);
+            session.HeartbeatTimer = new Timer(_ => HeartbeatTick(session), null, TimeSpan.Zero, _heartbeatInterval);
         }
 
         private void HeartbeatTick(Session session)
@@ -335,10 +370,10 @@ namespace NetClient
             if (session.Cts.IsCancellationRequested)
                 return;
 
-            var lastHeartbeat = new DateTime(Volatile.Read(ref session.LastHeartbeatTicks), DateTimeKind.Utc);
-            if (DateTime.UtcNow - lastHeartbeat > _options.HeartbeatTimeout)
+            var lastReceived = new DateTime(Volatile.Read(ref session.LastReceivedTicks), DateTimeKind.Utc);
+            if (DateTime.UtcNow - lastReceived > _options.HeartbeatTimeout)
             {
-                _log.Write(NetLogLevel.Warning, "Heartbeat timeout, disconnecting...");
+                _log.Write(NetLogLevel.Warning, "Nothing received within the heartbeat timeout, disconnecting...");
                 Disconnect(session);
                 return;
             }
