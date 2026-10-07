@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A reusable client connection layer: JSON line packets over a replaceable stream transport,
+       with connect / handshake / heartbeat / reconnect. References nothing of any game. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>NetClient</RootNamespace>
+  </PropertyGroup>
+</Project>
