@@ -13,13 +13,14 @@ One packet per line (UTF-8, ending in `\n`):
 {"type":"Heartbeat","senderId":"…","roomId":"","data":"","token":""}
 ```
 
-`type` is a plain string; `data` is usually a JSON document of its own. See `Envelope`.
+`type` is a plain string; `data` is usually a JSON document of its own. An optional
+`refreshToken` (a long-lived login token) is present only when set. See `Envelope`.
 
 ## Types
 
 | Type | Role |
 | --- | --- |
-| `Envelope` | The packet: `Type`, `SenderId`, `RoomId`, `Data`, `Token`; `Create`, `Serialize`, `TryParse` (never throws). |
+| `Envelope` | The packet: `Type`, `SenderId`, `RoomId`, `Data`, `Token`, `RefreshToken` (optional, omitted when null); `Create`, `Serialize`, `TryParse` (never throws). |
 | `LineFraming` | Newline framing over a stream: `ReadLineAsync` (single reader), `WriteLine` (thread-safe). |
 | `NetConnection` | The lifecycle: `ConnectAsync(handshake)`, `Disconnect`, `Reconnect`, `Send`, `SetHeartbeatInterval`, `IsConnected`, `ClientId`; events `EnvelopeReceived`, `Disconnected`. |
 | `NetConnectionOptions` | `HeartbeatType` (null: no heartbeat), `HeartbeatInterval` (1 s, the starting value), `HeartbeatTimeout` (8 s). |

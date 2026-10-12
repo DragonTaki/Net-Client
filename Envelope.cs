@@ -3,17 +3,19 @@
 // Do not distribute or modify
 // Author: DragonTaki (https://github.com/DragonTaki)
 // Create Date: 2026/10/07
-// Update Date: 2026/10/07
-// Version: v1.0
+// Update Date: 2026/10/12
+// Version: v1.1
 /* ----- ----- ----- ----- */
 
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace NetClient
 {
     /// <summary>
     /// One protocol message, sent as one JSON line:
-    /// <c>{"type":…,"senderId":…,"roomId":…,"data":…,"token":…}</c>.
+    /// <c>{"type":…,"senderId":…,"roomId":…,"data":…,"token":…}</c>, plus <c>"refreshToken"</c>
+    /// when one is set.
     /// <see cref="Type"/> is a plain string; the application maps it to its own packet kinds.
     /// </summary>
     public sealed class Envelope
@@ -33,6 +35,13 @@ namespace NetClient
         /// <summary>The session token issued at login, or empty.</summary>
         public string Token { get; set; } = "";
 
+        /// <summary>
+        /// A long-lived login token (e.g. the one a remembered login is given, to log in with
+        /// next time), or null. Left out of the JSON when null; null when a received packet has none.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string RefreshToken { get; set; }
+
         private static readonly JsonSerializerOptions _options = new()
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -45,8 +54,9 @@ namespace NetClient
         /// <param name="roomId">The room, or empty.</param>
         /// <param name="data">The payload.</param>
         /// <param name="token">The session token, or empty.</param>
-        /// <returns>The envelope (null arguments become empty strings).</returns>
-        public static Envelope Create(string type, string senderId = "", string roomId = "", string data = "", string token = "")
+        /// <param name="refreshToken">The login token, or null for none.</param>
+        /// <returns>The envelope (null arguments other than <paramref name="refreshToken"/> become empty strings).</returns>
+        public static Envelope Create(string type, string senderId = "", string roomId = "", string data = "", string token = "", string refreshToken = null)
         {
             return new Envelope
             {
@@ -55,6 +65,7 @@ namespace NetClient
                 RoomId = roomId ?? "",
                 Data = data ?? "",
                 Token = token ?? "",
+                RefreshToken = refreshToken,
             };
         }
 
@@ -67,7 +78,8 @@ namespace NetClient
         /// invalid JSON or the literal <c>null</c> give false and a short reason.
         /// </summary>
         /// <param name="line">The received line (without its line break).</param>
-        /// <param name="envelope">The parsed envelope (missing or null fields are empty strings), or null.</param>
+        /// <param name="envelope">The parsed envelope (missing or null fields are empty strings, except
+        /// <see cref="RefreshToken"/>, which stays null), or null.</param>
         /// <param name="error">Why the line was rejected, or null.</param>
         /// <returns>True when the line held an envelope.</returns>
         public static bool TryParse(string line, out Envelope envelope, out string error)
